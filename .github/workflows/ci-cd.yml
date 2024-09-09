@@ -32,7 +32,7 @@ jobs:
     - name: Build, tag, and push image to Amazon ECR
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+        IMAGE_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-${{ github.sha }}
       run: |
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
@@ -51,17 +51,34 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Update kubeconfig
-      run: aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | kubectl apply -f -
+      run: |
+        aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+    - name: Verify cluster connectivity
+      run: kubectl get nodes
 
     - name: Deploy to EKS
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+        IMAGE_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-${{ github.sha }}
       run: |
         sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
+        sed -i 's|:${IMAGE_TAG}|:'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
         kubectl apply -f k8s/$ENVIRONMENT/deployment.yaml
 
-    - name: Update ArgoCD application
+    - name: Install ArgoCD CLI
       run: |
+        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+        rm argocd-linux-amd64
+
+    - name: Update ArgoCD application
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+        ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+        ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+      run: |
+        argocd login $ARGOCD_SERVER --auth-token $ARGOCD_AUTH_TOKEN --insecure
         argocd app set sample-app --path k8s/$ENVIRONMENT
         argocd app sync sample-app
