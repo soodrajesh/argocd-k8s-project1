@@ -78,7 +78,7 @@ jobs:
 
     - name: Port forward ArgoCD server
       run: |
-        kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+        kubectl port-forward svc/argocd-server -n argocd 8080:80 &
         echo $! > port-forward.pid
         sleep 5
         if ps -p $(cat port-forward.pid) > /dev/null; then
@@ -117,25 +117,25 @@ jobs:
         ps aux | grep "port-forward svc/argocd-server"
 
         echo "Attempting to log in to ArgoCD..."
-        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
+        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web --plaintext; then
           echo "Error: Failed to log in to ArgoCD. Please check your auth token."
           exit 1
         fi
 
         echo "Listing ArgoCD applications..."
-        if ! argocd app list; then
+        if ! argocd app list --grpc-web --plaintext; then
           echo "Error: Failed to list ArgoCD applications."
           exit 1
         fi
 
         echo "Setting ArgoCD application parameters..."
-        if ! argocd app set sample-app --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT"; then
+        if ! argocd app set sample-app --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT" --grpc-web --plaintext; then
           echo "Error: Failed to set ArgoCD application parameters."
           exit 1
         fi
 
         echo "Syncing ArgoCD application..."
-        if ! argocd app sync sample-app; then
+        if ! argocd app sync sample-app --grpc-web --plaintext; then
           echo "Error: Failed to sync ArgoCD application."
           exit 1
         fi
