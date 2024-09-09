@@ -96,26 +96,30 @@ jobs:
         echo "ArgoCD pods:"
         kubectl get pods -n argocd
 
+        # Get ArgoCD server address
+        ARGOCD_SERVER=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.spec.clusterIP}')
+        echo "ArgoCD server address: $ARGOCD_SERVER"
+
         echo "Attempting to log in to ArgoCD..."
-        if ! argocd login --port-forward --port-forward-namespace argocd --auth-token "$ARGOCD_AUTH_TOKEN" --insecure; then
+        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
           echo "Error: Failed to log in to ArgoCD. Please check your auth token."
           exit 1
         fi
 
         echo "Listing ArgoCD applications..."
-        if ! argocd app list --port-forward --port-forward-namespace argocd; then
+        if ! argocd app list --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
           echo "Error: Failed to list ArgoCD applications."
           exit 1
         fi
 
         echo "Setting ArgoCD application parameters..."
-        if ! argocd app set sample-app --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT" --port-forward --port-forward-namespace argocd; then
+        if ! argocd app set sample-app --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT"; then
           echo "Error: Failed to set ArgoCD application parameters."
           exit 1
         fi
 
         echo "Syncing ArgoCD application..."
-        if ! argocd app sync sample-app --port-forward --port-forward-namespace argocd; then
+        if ! argocd app sync sample-app --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
           echo "Error: Failed to sync ArgoCD application."
           exit 1
         fi
