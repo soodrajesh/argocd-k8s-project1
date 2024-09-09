@@ -91,15 +91,16 @@ jobs:
         fi
         
         echo "Attempting to login to ArgoCD..."
-        argocd login localhost:8080 --auth-token "$ARGOCD_AUTH_TOKEN" --insecure
+        argocd login localhost:8080 --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web
         
         echo "Attempting to set ArgoCD application..."
         argocd app set sample-app \
           --path "k8s/$ENVIRONMENT" \
-          --dest-namespace "$ENVIRONMENT"
+          --dest-namespace "$ENVIRONMENT" \
+          --grpc-web
         
         echo "Attempting to sync ArgoCD application..."
-        argocd app sync sample-app
+        argocd app sync sample-app --grpc-web
 
     - name: Cleanup port-forward
       if: always()
