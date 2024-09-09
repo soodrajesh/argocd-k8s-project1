@@ -75,19 +75,16 @@ jobs:
         sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
         rm argocd-linux-amd64
 
+    - name: Port-forward ArgoCD server
+      run: |
+        kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+        sleep 5
+
     - name: Deploy with ArgoCD
       env:
         ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
-        ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        echo "ARGOCD_SERVER: $ARGOCD_SERVER"
-        
-        if [ -z "$ARGOCD_SERVER" ]; then
-          echo "Error: ARGOCD_SERVER is not set or empty"
-          exit 1
-        fi
-        
         if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
           echo "Error: ARGOCD_AUTH_TOKEN is not set or empty"
           exit 1
@@ -95,7 +92,7 @@ jobs:
         
         echo "Attempting to set ArgoCD application..."
         argocd app set sample-app \
-          --server "$ARGOCD_SERVER" \
+          --server localhost:8080 \
           --auth-token "$ARGOCD_AUTH_TOKEN" \
           --grpc-web \
           --insecure \
@@ -104,7 +101,12 @@ jobs:
         
         echo "Attempting to sync ArgoCD application..."
         argocd app sync sample-app \
-          --server "$ARGOCD_SERVER" \
+          --server localhost:8080 \
           --auth-token "$ARGOCD_AUTH_TOKEN" \
           --grpc-web \
           --insecure
+
+    - name: Cleanup port-forward
+      if: always()
+      run: |
+        kill $(pgrep -f "kubectl port-forward svc/argocd-server")
