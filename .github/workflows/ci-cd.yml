@@ -54,6 +54,11 @@ jobs:
       run: |
         aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
+    - name: Verify ArgoCD Installation
+      run: |
+        kubectl get pods -n argocd
+        kubectl get application -n argocd
+
     - name: Update ArgoCD Application
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
@@ -87,7 +92,7 @@ jobs:
     - name: Wait for Sync to Complete
       run: |
         echo "Waiting for sync to complete..."
-        while true; do
+        for i in {1..30}; do
           sync_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.sync.status}')
           health_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
           echo "Sync Status: $sync_status, Health Status: $health_status"
@@ -95,9 +100,19 @@ jobs:
             echo "Application synced and healthy"
             exit 0
           fi
-          if [ "$sync_status" = "Synced" ] && [ "$health_status" = "Degraded" ]; then
-            echo "Application synced but health is degraded. Check application logs for more information."
+          if [ "$i" -eq 30 ]; then
+            echo "Timeout waiting for application to sync and become healthy"
+            kubectl get application sample-app -n argocd -o yaml
             exit 1
           fi
           sleep 10
         done
+
+    - name: Debug Information
+      if: failure()
+      run: |
+        echo "Debug information:"
+        kubectl get pods -n argocd
+        kubectl get application sample-app -n argocd -o yaml
+        kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
+        kubectl describe application sample-app -n argocd
