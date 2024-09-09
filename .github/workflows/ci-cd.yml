@@ -86,9 +86,33 @@ jobs:
         ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
         ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
       run: |
+        if [ -z "$ARGOCD_SERVER" ]; then
+          echo "Error: ARGOCD_SERVER is not set. Please add it to your GitHub secrets."
+          exit 1
+        fi
+
+        if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
+          echo "Error: ARGOCD_AUTH_TOKEN is not set. Please add it to your GitHub secrets."
+          exit 1
+        fi
+
         echo "ARGOCD_SERVER: $ARGOCD_SERVER"
         echo "ENVIRONMENT: $ENVIRONMENT"
         echo "Auth token length: ${#ARGOCD_AUTH_TOKEN}"
-        argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure
-        argocd app set sample-app --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT"
-        argocd app sync sample-app
+
+        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure; then
+          echo "Error: Failed to log in to ArgoCD. Please check your server URL and auth token."
+          exit 1
+        fi
+
+        if ! argocd app set sample-app --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT"; then
+          echo "Error: Failed to set ArgoCD application parameters."
+          exit 1
+        fi
+
+        if ! argocd app sync sample-app; then
+          echo "Error: Failed to sync ArgoCD application."
+          exit 1
+        fi
+
+        echo "ArgoCD application updated and synced successfully."
