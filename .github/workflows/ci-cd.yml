@@ -62,16 +62,11 @@ jobs:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
         IMAGE_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-${{ github.sha }}
       run: |
-        # Create namespace if it doesn't exist
         kubectl create namespace $ENVIRONMENT --dry-run=client -o yaml | kubectl apply -f -
-        
-        # Update deployment file
         sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|:${IMAGE_TAG}|:'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|${ENVIRONMENT}|'$ENVIRONMENT'|g' k8s/$ENVIRONMENT/deployment.yaml
-        
-        # Apply the deployment
         kubectl apply -f k8s/$ENVIRONMENT/deployment.yaml --namespace $ENVIRONMENT
 
     - name: Install ArgoCD CLI
@@ -81,45 +76,29 @@ jobs:
         sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
         rm argocd-linux-amd64
 
-    - name: Check ArgoCD server connectivity
+    - name: Port forward ArgoCD server
       run: |
-        ARGOCD_HOST=$(echo ${{ secrets.ARGOCD_SERVER }} | sed -E 's#https?://##' | cut -d: -f1)
-        ARGOCD_PORT=$(echo ${{ secrets.ARGOCD_SERVER }} | sed -E 's#.*:##')
-        echo "Checking connectivity to $ARGOCD_HOST:$ARGOCD_PORT"
-        nc -zv $ARGOCD_HOST $ARGOCD_PORT
+        kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+        sleep 5
 
     - name: Update ArgoCD application
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-        ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
         ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
       run: |
-        if [ -z "$ARGOCD_SERVER" ]; then
-          echo "Error: ARGOCD_SERVER is not set. Please add it to your GitHub secrets."
-          exit 1
-        fi
-
         if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
           echo "Error: ARGOCD_AUTH_TOKEN is not set. Please add it to your GitHub secrets."
           exit 1
         fi
 
-        echo "ARGOCD_SERVER: $ARGOCD_SERVER"
         echo "ENVIRONMENT: $ENVIRONMENT"
         echo "Auth token length: ${#ARGOCD_AUTH_TOKEN}"
 
-        # Add debug information
         argocd version
         kubectl get pods -n argocd
 
-        # Extract host and port from ARGOCD_SERVER
-        ARGOCD_HOST=$(echo $ARGOCD_SERVER | sed -E 's#https?://##' | cut -d: -f1)
-        ARGOCD_PORT=$(echo $ARGOCD_SERVER | sed -E 's#.*:##')
-
-        echo "Attempting to connect to ArgoCD server at $ARGOCD_HOST:$ARGOCD_PORT"
-
-        if ! argocd login "$ARGOCD_HOST:$ARGOCD_PORT" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
-          echo "Error: Failed to log in to ArgoCD. Please check your server URL and auth token."
+        if ! argocd login localhost:8080 --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
+          echo "Error: Failed to log in to ArgoCD. Please check your auth token."
           exit 1
         fi
 
