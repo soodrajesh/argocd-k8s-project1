@@ -54,31 +54,45 @@ jobs:
       run: |
         aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
-    - name: Install ArgoCD CLI
-      run: |
-        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-        sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
-        rm argocd-linux-amd64
-
-    - name: Deploy with ArgoCD
+    - name: Update ArgoCD Application
       env:
-        ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        # Start port-forwarding
-        kubectl port-forward svc/argocd-server -n argocd 8080:443 &
-        PF_PID=$!
-        sleep 5  # Give it some time to establish the connection
+        kubectl patch application sample-app -n argocd --type=merge -p '{"spec":{"source":{"path":"k8s/'$ENVIRONMENT'"},"destination":{"namespace":"'$ENVIRONMENT'"}}}'
 
-        # Use localhost:8080 as the ArgoCD server address
-        argocd login localhost:8080 --auth-token $ARGOCD_AUTH_TOKEN --insecure
+    - name: Trigger ArgoCD Sync
+      run: |
+        kubectl patch application sample-app -n argocd --type=merge -p '{"operation": {"sync": {"revision": "HEAD"}}}'
 
-        argocd app set sample-app --path k8s/$ENVIRONMENT --dest-namespace $ENVIRONMENT
-        argocd app sync sample-app --timeout 180
+    - name: Wait for Sync to Complete
+      run: |
+        echo "Waiting for sync to complete..."
+        start_time=$(date +%s)
+        timeout=120  # 2 minutes timeout
+        while true; do
+          current_time=$(date +%s)
+          elapsed=$((current_time - start_time))
+          
+          if [ $elapsed -ge $timeout ]; then
+            echo "Timeout waiting for application to sync and become healthy"
+            kubectl get application sample-app -n argocd -o yaml
+            exit 1
+          fi
 
-        # Kill the port-forwarding process
-        kill $PF_PID
+          sync_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.sync.status}')
+          health_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
+          echo "Sync Status: $sync_status, Health Status: $health_status"
+          
+          if [ "$sync_status" = "Synced" ] && [ "$health_status" = "Healthy" ]; then
+            echo "Application synced and healthy"
+            exit 0
+          fi
+          
+          sleep 5
+        done
 
     - name: Verify Deployment
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        kubectl get pods -n ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+        kubectl get pods -n $ENVIRONMENT
