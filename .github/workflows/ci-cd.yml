@@ -43,15 +43,30 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update kubeconfig
+      run: |
+        aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
     - name: Install ArgoCD CLI
       run: |
         curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
         sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
         rm argocd-linux-amd64
 
+    - name: Port-forward ArgoCD server
+      run: |
+        kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+        sleep 5
+
     - name: Deploy to ArgoCD
       env:
-        ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
         ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
@@ -60,10 +75,17 @@ jobs:
                                   --repo ${{ github.server_url }}/${{ github.repository }} \
                                   --path k8s/$ENVIRONMENT \
                                   --revision ${{ github.sha }} \
-                                  --server $ARGOCD_SERVER \
+                                  --server localhost:8080 \
                                   --auth-token $ARGOCD_AUTH_TOKEN \
-                                  --grpc-web
+                                  --grpc-web \
+                                  --insecure
 
-        argocd app sync sample-app --server $ARGOCD_SERVER \
+        argocd app sync sample-app --server localhost:8080 \
                                    --auth-token $ARGOCD_AUTH_TOKEN \
-                                   --grpc-web
+                                   --grpc-web \
+                                   --insecure
+
+    - name: Cleanup port-forward
+      if: always()
+      run: |
+        kill $(pgrep -f "kubectl port-forward svc/argocd-server")
