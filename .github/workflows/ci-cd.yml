@@ -62,10 +62,17 @@ jobs:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
         IMAGE_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-${{ github.sha }}
       run: |
+        # Create namespace if it doesn't exist
+        kubectl create namespace $ENVIRONMENT --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Update deployment file
         sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|:${IMAGE_TAG}|:'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
-        kubectl apply -f k8s/$ENVIRONMENT/deployment.yaml
+        sed -i 's|${ENVIRONMENT}|'$ENVIRONMENT'|g' k8s/$ENVIRONMENT/deployment.yaml
+        
+        # Apply the deployment
+        kubectl apply -f k8s/$ENVIRONMENT/deployment.yaml --namespace $ENVIRONMENT
 
     - name: Install ArgoCD CLI
       run: |
@@ -80,5 +87,5 @@ jobs:
         ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
       run: |
         argocd login $ARGOCD_SERVER --auth-token $ARGOCD_AUTH_TOKEN --insecure
-        argocd app set sample-app --path k8s/$ENVIRONMENT
+        argocd app set sample-app --path k8s/$ENVIRONMENT --dest-namespace $ENVIRONMENT
         argocd app sync sample-app
