@@ -81,6 +81,13 @@ jobs:
         sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
         rm argocd-linux-amd64
 
+    - name: Check ArgoCD server connectivity
+      run: |
+        ARGOCD_HOST=$(echo ${{ secrets.ARGOCD_SERVER }} | sed -E 's#https?://##' | cut -d: -f1)
+        ARGOCD_PORT=$(echo ${{ secrets.ARGOCD_SERVER }} | sed -E 's#.*:##')
+        echo "Checking connectivity to $ARGOCD_HOST:$ARGOCD_PORT"
+        nc -zv $ARGOCD_HOST $ARGOCD_PORT
+
     - name: Update ArgoCD application
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
@@ -105,7 +112,13 @@ jobs:
         argocd version
         kubectl get pods -n argocd
 
-        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
+        # Extract host and port from ARGOCD_SERVER
+        ARGOCD_HOST=$(echo $ARGOCD_SERVER | sed -E 's#https?://##' | cut -d: -f1)
+        ARGOCD_PORT=$(echo $ARGOCD_SERVER | sed -E 's#.*:##')
+
+        echo "Attempting to connect to ArgoCD server at $ARGOCD_HOST:$ARGOCD_PORT"
+
+        if ! argocd login "$ARGOCD_HOST:$ARGOCD_PORT" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
           echo "Error: Failed to log in to ArgoCD. Please check your server URL and auth token."
           exit 1
         fi
