@@ -76,7 +76,8 @@ jobs:
 
     - name: Install ArgoCD CLI
       run: |
-        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        ARGOCD_VERSION=$(kubectl get deployment argocd-server -n argocd -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d ':' -f2)
+        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/$ARGOCD_VERSION/argocd-linux-amd64
         sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
         rm argocd-linux-amd64
 
@@ -100,8 +101,17 @@ jobs:
         echo "ENVIRONMENT: $ENVIRONMENT"
         echo "Auth token length: ${#ARGOCD_AUTH_TOKEN}"
 
-        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure; then
+        # Add debug information
+        argocd version
+        kubectl get pods -n argocd
+
+        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
           echo "Error: Failed to log in to ArgoCD. Please check your server URL and auth token."
+          exit 1
+        fi
+
+        if ! argocd app list; then
+          echo "Error: Failed to list ArgoCD applications."
           exit 1
         fi
 
