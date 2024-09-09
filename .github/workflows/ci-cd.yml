@@ -76,18 +76,6 @@ jobs:
         sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
         rm argocd-linux-amd64
 
-    - name: Port forward ArgoCD server
-      run: |
-        kubectl port-forward svc/argocd-server -n argocd 8080:80 &
-        echo $! > port-forward.pid
-        sleep 5
-        if ps -p $(cat port-forward.pid) > /dev/null; then
-          echo "Port forwarding is running."
-        else
-          echo "Error: Port forwarding failed to start."
-          exit 1
-        fi
-
     - name: Update ArgoCD application
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
@@ -101,11 +89,6 @@ jobs:
         echo "ENVIRONMENT: $ENVIRONMENT"
         echo "Auth token length: ${#ARGOCD_AUTH_TOKEN}"
 
-        # Set ArgoCD server address
-        export ARGOCD_SERVER=localhost:8080
-
-        echo "ArgoCD server address: $ARGOCD_SERVER"
-
         # Debug information
         echo "ArgoCD CLI version:"
         argocd version
@@ -113,29 +96,26 @@ jobs:
         echo "ArgoCD pods:"
         kubectl get pods -n argocd
 
-        echo "Port forward status:"
-        ps aux | grep "port-forward svc/argocd-server"
-
         echo "Attempting to log in to ArgoCD..."
-        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web --plaintext; then
+        if ! argocd login --port-forward --port-forward-namespace argocd --auth-token "$ARGOCD_AUTH_TOKEN" --insecure; then
           echo "Error: Failed to log in to ArgoCD. Please check your auth token."
           exit 1
         fi
 
         echo "Listing ArgoCD applications..."
-        if ! argocd app list --grpc-web --plaintext; then
+        if ! argocd app list --port-forward --port-forward-namespace argocd; then
           echo "Error: Failed to list ArgoCD applications."
           exit 1
         fi
 
         echo "Setting ArgoCD application parameters..."
-        if ! argocd app set sample-app --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT" --grpc-web --plaintext; then
+        if ! argocd app set sample-app --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT" --port-forward --port-forward-namespace argocd; then
           echo "Error: Failed to set ArgoCD application parameters."
           exit 1
         fi
 
         echo "Syncing ArgoCD application..."
-        if ! argocd app sync sample-app --grpc-web --plaintext; then
+        if ! argocd app sync sample-app --port-forward --port-forward-namespace argocd; then
           echo "Error: Failed to sync ArgoCD application."
           exit 1
         fi
