@@ -65,10 +65,20 @@ jobs:
         ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        ARGOCD_SERVER=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-        echo "ArgoCD Server: $ARGOCD_SERVER"
+        # Start port-forwarding
+        kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+        PF_PID=$!
+        sleep 5  # Give it some time to establish the connection
 
-        argocd login $ARGOCD_SERVER --auth-token $ARGOCD_AUTH_TOKEN --insecure
+        # Use localhost:8080 as the ArgoCD server address
+        argocd login localhost:8080 --auth-token $ARGOCD_AUTH_TOKEN --insecure
 
         argocd app set sample-app --path k8s/$ENVIRONMENT --dest-namespace $ENVIRONMENT
-        argocd app sync sample-app --timeout 60
+        argocd app sync sample-app --timeout 180
+
+        # Kill the port-forwarding process
+        kill $PF_PID
+
+    - name: Verify Deployment
+      run: |
+        kubectl get pods -n ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
