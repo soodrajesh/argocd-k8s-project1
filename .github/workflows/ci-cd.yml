@@ -14,28 +14,7 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
-
-    - name: Build, tag, and push image to Amazon ECR
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-${{ github.sha }}
-      run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+    # ... (keep the existing build-and-push job as is)
 
   deploy:
     needs: build-and-push
@@ -54,74 +33,28 @@ jobs:
       run: |
         aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
-    - name: Verify cluster connectivity
-      run: kubectl get nodes
-
-    - name: Deploy to EKS
-      env:
-        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-        IMAGE_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-${{ github.sha }}
-      run: |
-        kubectl create namespace $ENVIRONMENT --dry-run=client -o yaml | kubectl apply -f -
-        sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' k8s/$ENVIRONMENT/deployment.yaml
-        sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
-        sed -i 's|:${IMAGE_TAG}|:'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
-        sed -i 's|${ENVIRONMENT}|'$ENVIRONMENT'|g' k8s/$ENVIRONMENT/deployment.yaml
-        kubectl apply -f k8s/$ENVIRONMENT/deployment.yaml --namespace $ENVIRONMENT
-
     - name: Install ArgoCD CLI
       run: |
-        ARGOCD_VERSION=$(kubectl get deployment argocd-server -n argocd -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d ':' -f2)
-        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/$ARGOCD_VERSION/argocd-linux-amd64
+        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
         sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
         rm argocd-linux-amd64
 
-    - name: Update ArgoCD application
+    - name: Deploy with ArgoCD
       env:
-        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
         ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
-          echo "Error: ARGOCD_AUTH_TOKEN is not set. Please add it to your GitHub secrets."
-          exit 1
-        fi
+        argocd app set sample-app \
+          --server $ARGOCD_SERVER \
+          --auth-token $ARGOCD_AUTH_TOKEN \
+          --grpc-web \
+          --insecure \
+          --path k8s/$ENVIRONMENT \
+          --dest-namespace $ENVIRONMENT
 
-        echo "ENVIRONMENT: $ENVIRONMENT"
-        echo "Auth token length: ${#ARGOCD_AUTH_TOKEN}"
-
-        # Debug information
-        echo "ArgoCD CLI version:"
-        argocd version
-
-        echo "ArgoCD pods:"
-        kubectl get pods -n argocd
-
-        # Get ArgoCD server address
-        ARGOCD_SERVER=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.spec.clusterIP}')
-        echo "ArgoCD server address: $ARGOCD_SERVER"
-
-        echo "Attempting to log in to ArgoCD..."
-        if ! argocd login "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
-          echo "Error: Failed to log in to ArgoCD. Please check your auth token."
-          exit 1
-        fi
-
-        echo "Listing ArgoCD applications..."
-        if ! argocd app list --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
-          echo "Error: Failed to list ArgoCD applications."
-          exit 1
-        fi
-
-        echo "Setting ArgoCD application parameters..."
-        if ! argocd app set sample-app --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web --path "k8s/$ENVIRONMENT" --dest-namespace "$ENVIRONMENT"; then
-          echo "Error: Failed to set ArgoCD application parameters."
-          exit 1
-        fi
-
-        echo "Syncing ArgoCD application..."
-        if ! argocd app sync sample-app --server "$ARGOCD_SERVER" --auth-token "$ARGOCD_AUTH_TOKEN" --insecure --grpc-web; then
-          echo "Error: Failed to sync ArgoCD application."
-          exit 1
-        fi
-
-        echo "ArgoCD application updated and synced successfully."
+        argocd app sync sample-app \
+          --server $ARGOCD_SERVER \
+          --auth-token $ARGOCD_AUTH_TOKEN \
+          --grpc-web \
+          --insecure
