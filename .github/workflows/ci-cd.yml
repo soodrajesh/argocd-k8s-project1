@@ -71,19 +71,33 @@ jobs:
 
     - name: Deploy with ArgoCD
       env:
-        ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
-          echo "Error: ARGOCD_AUTH_TOKEN is not set or empty"
-          exit 1
-        fi
-        
         echo "Updating ArgoCD application..."
         kubectl patch application sample-app -n argocd --type merge -p '{"spec":{"source":{"path":"k8s/'$ENVIRONMENT'"},"destination":{"namespace":"'$ENVIRONMENT'"}}}'
         
         echo "Triggering sync for ArgoCD application..."
         kubectl patch application sample-app -n argocd --type merge -p '{"operation":{"sync":{"revision":"HEAD"}}}'
         
-        echo "Waiting for sync to complete..."
-        kubectl wait --for=condition=Synced application/sample-app -n argocd --timeout=2m
+        echo "Waiting for sync to start..."
+        kubectl wait --for=condition=Running=true application/sample-app -n argocd --timeout=2m
+        
+        echo "Sync started. Monitoring progress..."
+        for i in {1..10}; do
+          echo "Checking sync status (attempt $i)..."
+          SYNC_STATUS=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.sync.status}')
+          HEALTH_STATUS=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
+          echo "Sync Status: $SYNC_STATUS, Health Status: $HEALTH_STATUS"
+          
+          if [ "$SYNC_STATUS" == "Synced" ] && [ "$HEALTH_STATUS" == "Healthy" ]; then
+            echo "Application successfully synced and healthy!"
+            exit 0
+          fi
+          
+          echo "Waiting for 30 seconds before next check..."
+          sleep 30
+        done
+        
+        echo "Sync did not complete within the expected time. Current status:"
+        kubectl get application sample-app -n argocd -o yaml
+        exit 1
