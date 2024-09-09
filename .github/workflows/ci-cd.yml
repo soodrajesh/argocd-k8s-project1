@@ -81,16 +81,30 @@ jobs:
         ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
+        echo "ARGOCD_SERVER: $ARGOCD_SERVER"
+        
+        if [ -z "$ARGOCD_SERVER" ]; then
+          echo "Error: ARGOCD_SERVER is not set or empty"
+          exit 1
+        fi
+        
+        if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
+          echo "Error: ARGOCD_AUTH_TOKEN is not set or empty"
+          exit 1
+        fi
+        
+        echo "Attempting to set ArgoCD application..."
         argocd app set sample-app \
-          --server $ARGOCD_SERVER \
-          --auth-token $ARGOCD_AUTH_TOKEN \
+          --server "$ARGOCD_SERVER" \
+          --auth-token "$ARGOCD_AUTH_TOKEN" \
           --grpc-web \
           --insecure \
-          --path k8s/$ENVIRONMENT \
-          --dest-namespace $ENVIRONMENT
-
+          --path "k8s/$ENVIRONMENT" \
+          --dest-namespace "$ENVIRONMENT"
+        
+        echo "Attempting to sync ArgoCD application..."
         argocd app sync sample-app \
-          --server $ARGOCD_SERVER \
-          --auth-token $ARGOCD_AUTH_TOKEN \
+          --server "$ARGOCD_SERVER" \
+          --auth-token "$ARGOCD_AUTH_TOKEN" \
           --grpc-web \
           --insecure
