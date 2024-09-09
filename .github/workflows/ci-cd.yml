@@ -32,7 +32,7 @@ jobs:
     - name: Build, tag, and push image to Amazon ECR
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}-${{ github.sha }}
+        IMAGE_TAG: ${{ github.sha }}
       run: |
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
@@ -43,56 +43,27 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Update kubeconfig
+    - name: Install ArgoCD CLI
       run: |
-        aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+        curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+        sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+        rm argocd-linux-amd64
 
-    - name: Update ArgoCD Application
+    - name: Deploy to ArgoCD
       env:
+        ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+        ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        kubectl patch application sample-app -n argocd --type=merge -p '{"spec":{"source":{"path":"k8s/'$ENVIRONMENT'"},"destination":{"namespace":"'$ENVIRONMENT'"}}}'
+        argocd app set sample-app --dest-namespace $ENVIRONMENT \
+                                  --dest-server https://kubernetes.default.svc \
+                                  --repo ${{ github.server_url }}/${{ github.repository }} \
+                                  --path k8s/$ENVIRONMENT \
+                                  --revision ${{ github.sha }} \
+                                  --server $ARGOCD_SERVER \
+                                  --auth-token $ARGOCD_AUTH_TOKEN \
+                                  --grpc-web
 
-    - name: Trigger ArgoCD Sync
-      run: |
-        kubectl patch application sample-app -n argocd --type=merge -p '{"operation": {"sync": {"revision": "HEAD"}}}'
-
-    - name: Wait for Sync to Complete
-      run: |
-        echo "Waiting for sync to complete..."
-        start_time=$(date +%s)
-        timeout=120  # 2 minutes timeout
-        while true; do
-          current_time=$(date +%s)
-          elapsed=$((current_time - start_time))
-          
-          if [ $elapsed -ge $timeout ]; then
-            echo "Timeout waiting for application to sync and become healthy"
-            kubectl get application sample-app -n argocd -o yaml
-            exit 1
-          fi
-
-          sync_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.sync.status}')
-          health_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
-          echo "Sync Status: $sync_status, Health Status: $health_status"
-          
-          if [ "$sync_status" = "Synced" ] && [ "$health_status" = "Healthy" ]; then
-            echo "Application synced and healthy"
-            exit 0
-          fi
-          
-          sleep 5
-        done
-
-    - name: Verify Deployment
-      env:
-        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-      run: |
-        kubectl get pods -n $ENVIRONMENT
+        argocd app sync sample-app --server $ARGOCD_SERVER \
+                                   --auth-token $ARGOCD_AUTH_TOKEN \
+                                   --grpc-web
