@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+      with:
+        token: ${{ secrets.PAT }}
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
@@ -42,6 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+      with:
+        token: ${{ secrets.PAT }}
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
@@ -94,18 +98,13 @@ jobs:
         sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|${IMAGE_TAG}|'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
 
-    - name: Configure Git
+    - name: Commit and push updated manifests
       run: |
         git config --global user.name 'GitHub Actions'
         git config --global user.email 'github-actions@github.com'
-
-    - name: Commit and push updated manifests
-      env:
-        PAT: ${{ secrets.PAT }}
-      run: |
         git add k8s/
         git commit -m "Update image tag to ${{ github.sha }}" || echo "No changes to commit"
-        git push https://$PAT@github.com/${{ github.repository }}.git HEAD:${{ github.ref }}
+        git push
 
     - name: Wait for Sync to Complete
       run: |
