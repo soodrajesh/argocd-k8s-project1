@@ -31,6 +31,8 @@ jobs:
     needs: check-trigger
     if: needs.check-trigger.outputs.should_run == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set_image_tag.outputs.image_tag }}
     steps:
     - uses: actions/checkout@v2
 
@@ -59,16 +61,19 @@ jobs:
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         
-        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+        echo "::set-output name=image_tag::$IMAGE_TAG"
+      id: set_image_tag
 
     - name: Verify ECR Image
       run: |
-        aws ecr describe-images --repository-name $ECR_REPOSITORY --image-ids imageTag=${{ env.IMAGE_TAG }}
+        aws ecr describe-images --repository-name $ECR_REPOSITORY --image-ids imageTag=${{ steps.set_image_tag.outputs.image_tag }}
 
   deploy:
     needs: [check-trigger, build-and-push]
     if: needs.check-trigger.outputs.should_run == 'true'
     runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
     steps:
     - uses: actions/checkout@v2
 
@@ -96,12 +101,12 @@ jobs:
         echo "Updating manifests with:"
         echo "ECR_REGISTRY: $ECR_REGISTRY"
         echo "ECR_REPOSITORY: $ECR_REPOSITORY"
-        echo "IMAGE_TAG: ${{ env.IMAGE_TAG }}"
+        echo "IMAGE_TAG: $IMAGE_TAG"
         echo "ENVIRONMENT: $ENVIRONMENT"
         
         sed -i "s|${ECR_REGISTRY}|$ECR_REGISTRY|g" k8s/$ENVIRONMENT/deployment.yaml
         sed -i "s|${ECR_REPOSITORY}|$ECR_REPOSITORY|g" k8s/$ENVIRONMENT/deployment.yaml
-        sed -i "s|${IMAGE_TAG}|${{ env.IMAGE_TAG }}|g" k8s/$ENVIRONMENT/deployment.yaml
+        sed -i "s|${IMAGE_TAG}|$IMAGE_TAG|g" k8s/$ENVIRONMENT/deployment.yaml
         sed -i "s|${ENVIRONMENT}|$ENVIRONMENT|g" k8s/$ENVIRONMENT/deployment.yaml
 
     - name: Print updated deployment file
@@ -157,7 +162,7 @@ jobs:
         git config --global user.name 'GitHub Actions'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add k8s/
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Update image tag to ${{ env.IMAGE_TAG }} [skip ci]" && git push)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update image tag to $IMAGE_TAG [skip ci]" && git push)
 
     - name: Wait for Sync to Complete
       env:
@@ -193,7 +198,7 @@ jobs:
         echo "Debug information:"
         echo "ECR_REGISTRY: $ECR_REGISTRY"
         echo "ECR_REPOSITORY: $ECR_REPOSITORY"
-        echo "IMAGE_TAG: ${{ env.IMAGE_TAG }}"
+        echo "IMAGE_TAG: $IMAGE_TAG"
         echo "ENVIRONMENT: $ENVIRONMENT"
         
         echo "Deployment YAML:"
