@@ -88,11 +88,41 @@ jobs:
         kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
         kubectl create namespace prod --dry-run=client -o yaml | kubectl apply -f -
 
-    - name: Create or Update ArgoCD Application
+    - name: Update Kubernetes manifests
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+        ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+      run: |
+        echo "Updating manifests with:"
+        echo "ECR_REGISTRY: $ECR_REGISTRY"
+        echo "ECR_REPOSITORY: $ECR_REPOSITORY"
+        echo "IMAGE_TAG: ${{ env.IMAGE_TAG }}"
+        echo "ENVIRONMENT: $ENVIRONMENT"
+        
+        sed -i "s|${ECR_REGISTRY}|$ECR_REGISTRY|g" k8s/$ENVIRONMENT/deployment.yaml
+        sed -i "s|${ECR_REPOSITORY}|$ECR_REPOSITORY|g" k8s/$ENVIRONMENT/deployment.yaml
+        sed -i "s|${IMAGE_TAG}|${{ env.IMAGE_TAG }}|g" k8s/$ENVIRONMENT/deployment.yaml
+        sed -i "s|${ENVIRONMENT}|$ENVIRONMENT|g" k8s/$ENVIRONMENT/deployment.yaml
+
+    - name: Print updated deployment file
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        cat <<EOF | kubectl apply -f -
+        echo "Updated deployment file:"
+        cat k8s/$ENVIRONMENT/deployment.yaml
+
+    - name: Validate Kubernetes manifests
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+      run: |
+        echo "Validating deployment.yaml:"
+        kubectl apply -f k8s/$ENVIRONMENT/deployment.yaml --dry-run=client -o yaml
+
+    - name: Validate ArgoCD Application
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+      run: |
+        cat <<EOF > argocd-app.yaml
         apiVersion: argoproj.io/v1alpha1
         kind: Application
         metadata:
@@ -112,27 +142,15 @@ jobs:
               prune: true
               selfHeal: true
         EOF
-
-    - name: Update Kubernetes manifests
-      env:
-        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-        ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-      run: |
-        echo "Updating manifests with:"
-        echo "ECR_REGISTRY: $ECR_REGISTRY"
-        echo "ECR_REPOSITORY: $ECR_REPOSITORY"
-        echo "IMAGE_TAG: ${{ env.IMAGE_TAG }}"
-        echo "ENVIRONMENT: $ENVIRONMENT"
         
-        sed -i "s|image:.*|image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${{ env.IMAGE_TAG }}|g" k8s/$ENVIRONMENT/deployment.yaml
-        sed -i "s|ENVIRONMENT:.*|ENVIRONMENT: \"${ENVIRONMENT}\"|g" k8s/$ENVIRONMENT/deployment.yaml
+        echo "Validating ArgoCD Application manifest:"
+        kubectl apply -f argocd-app.yaml --dry-run=client
 
-    - name: Print updated deployment file
+    - name: Create or Update ArgoCD Application
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        echo "Updated deployment file:"
-        cat k8s/$ENVIRONMENT/deployment.yaml
+        kubectl apply -f argocd-app.yaml
 
     - name: Commit and push updated manifests
       run: |
@@ -159,6 +177,8 @@ jobs:
           if [ $i -eq 30 ]; then
             echo "Timeout waiting for application to sync and become healthy"
             kubectl get application sample-app-$ENVIRONMENT -n argocd -o yaml
+            echo "ArgoCD Application Controller Logs:"
+            kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
             exit 1
           fi
           

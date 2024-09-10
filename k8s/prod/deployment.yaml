@@ -15,10 +15,10 @@ spec:
     spec:
       containers:
       - name: sample-app
-        image: 471112694187.dkr.ecr.us-west-2.amazonaws.com/my-sample-app/my-sample-app:
+        image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
         env:
         - name: ENVIRONMENT
-          value: "prod"
+          value: "${ENVIRONMENT}"
         ports:
         - containerPort: 5000
 ---
