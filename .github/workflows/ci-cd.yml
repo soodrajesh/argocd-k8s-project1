@@ -39,6 +39,13 @@ jobs:
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
+    - name: Verify ECR Image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        aws ecr describe-images --repository-name $ECR_REPOSITORY --image-ids imageTag=$IMAGE_TAG
+
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
@@ -101,10 +108,21 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' k8s/$ENVIRONMENT/deployment.yaml
-        sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
-        sed -i 's|${IMAGE_TAG}|'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
-        sed -i 's|${ENVIRONMENT}|'$ENVIRONMENT'|g' k8s/$ENVIRONMENT/deployment.yaml
+        echo "Updating manifests with:"
+        echo "ECR_REGISTRY: $ECR_REGISTRY"
+        echo "ECR_REPOSITORY: $ECR_REPOSITORY"
+        echo "IMAGE_TAG: $IMAGE_TAG"
+        echo "ENVIRONMENT: $ENVIRONMENT"
+        
+        sed -i "s|image:.*|image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}|g" k8s/$ENVIRONMENT/deployment.yaml
+        sed -i "s|ENVIRONMENT:.*|ENVIRONMENT: \"${ENVIRONMENT}\"|g" k8s/$ENVIRONMENT/deployment.yaml
+
+    - name: Print updated deployment file
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+      run: |
+        echo "Updated deployment file:"
+        cat k8s/$ENVIRONMENT/deployment.yaml
 
     - name: Commit and push updated manifests
       run: |
@@ -161,16 +179,29 @@ jobs:
 
     - name: Debug Information
       if: failure()
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
         echo "Debug information:"
-        kubectl get pods -n argocd
+        echo "ECR_REGISTRY: $ECR_REGISTRY"
+        echo "ECR_REPOSITORY: $ECR_REPOSITORY"
+        echo "IMAGE_TAG: ${{ github.sha }}"
+        echo "ENVIRONMENT: $ENVIRONMENT"
+        
+        echo "Deployment YAML:"
+        cat k8s/$ENVIRONMENT/deployment.yaml
+        
+        echo "Pods in $ENVIRONMENT namespace:"
+        kubectl get pods -n $ENVIRONMENT
+        
+        echo "Describing pods in $ENVIRONMENT namespace:"
+        kubectl describe pods -n $ENVIRONMENT
+        
+        echo "ArgoCD Application:"
         kubectl get application sample-app -n argocd -o yaml
+        
+        echo "ArgoCD Application Controller Logs:"
         kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
-        kubectl describe application sample-app -n argocd
         
-        echo "Checking resources in target namespace:"
-        ENVIRONMENT="${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}"
-        kubectl get all -n $ENVIRONMENT
-        
-        echo "Checking events in target namespace:"
+        echo "Events in $ENVIRONMENT namespace:"
         kubectl get events -n $ENVIRONMENT
