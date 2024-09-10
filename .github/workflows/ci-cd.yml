@@ -88,6 +88,13 @@ jobs:
               selfHeal: true
         EOF
 
+    - name: Verify ArgoCD Application
+      run: |
+        echo "Verifying ArgoCD Application..."
+        kubectl get application sample-app -n argocd -o yaml
+        echo "ArgoCD Application Resources:"
+        kubectl get application sample-app -n argocd -o jsonpath='{.status.resources}' | jq
+
     - name: Update Kubernetes manifests
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
@@ -97,6 +104,7 @@ jobs:
         sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|${IMAGE_TAG}|'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
+        sed -i 's|${ENVIRONMENT}|'$ENVIRONMENT'|g' k8s/$ENVIRONMENT/deployment.yaml
 
     - name: Commit and push updated manifests
       run: |
@@ -109,24 +117,60 @@ jobs:
     - name: Wait for Sync to Complete
       run: |
         echo "Waiting for sync to complete..."
-        kubectl wait --for=condition=Synced application/sample-app -n argocd --timeout=300s
+        for i in {1..30}; do
+          sync_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.sync.status}')
+          health_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
+          echo "Attempt $i: Sync Status: $sync_status, Health Status: $health_status"
+          
+          if [ "$sync_status" = "Synced" ]; then
+            echo "Application synced successfully"
+            break
+          fi
+          
+          if [ $i -eq 30 ]; then
+            echo "Timeout waiting for application to sync"
+            kubectl get application sample-app -n argocd -o yaml
+            exit 1
+          fi
+          
+          sleep 10
+        done
         
         echo "Checking application health..."
-        health_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
-        if [ "$health_status" = "Healthy" ]; then
-          echo "Application is healthy"
-          exit 0
-        else
-          echo "Application health status: $health_status"
-          kubectl get application sample-app -n argocd -o yaml
-          exit 1
-        fi
+        for i in {1..30}; do
+          health_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
+          echo "Attempt $i: Health Status: $health_status"
+          
+          if [ "$health_status" = "Healthy" ]; then
+            echo "Application is healthy"
+            exit 0
+          fi
+          
+          if [ $i -eq 30 ]; then
+            echo "Timeout waiting for application to become healthy"
+            kubectl get application sample-app -n argocd -o yaml
+            exit 1
+          fi
+          
+          sleep 10
+        done
+        
+        echo "Application failed to become healthy"
+        kubectl get application sample-app -n argocd -o yaml
+        exit 1
 
     - name: Debug Information
       if: failure()
       run: |
         echo "Debug information:"
         kubectl get pods -n argocd
-        kubectl get application sample-app -n argocd -o yaml || true
+        kubectl get application sample-app -n argocd -o yaml
         kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
-        kubectl describe application sample-app -n argocd || true
+        kubectl describe application sample-app -n argocd
+        
+        echo "Checking resources in target namespace:"
+        ENVIRONMENT="${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}"
+        kubectl get all -n $ENVIRONMENT
+        
+        echo "Checking events in target namespace:"
+        kubectl get events -n $ENVIRONMENT
