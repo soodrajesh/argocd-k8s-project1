@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: sample-app
-        image: /my-sample-app:72b9dd49439a0d592302ec50cb594fa6ecfa59d8
+        image: /my-sample-app:ae6fb14e4d57debf8fc85edcaa372902d38513a1
         env:
         - name: ENVIRONMENT
           value: "prod"
