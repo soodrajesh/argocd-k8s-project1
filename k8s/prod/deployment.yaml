@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: sample-app
-        image: /my-sample-app:4e4db8f99e53e01db9ae77d8b74f75ec1d823b68
+        image: 471112694187.dkr.ecr.us-west-2.amazonaws.com/my-sample-app/my-sample-app:
         env:
         - name: ENVIRONMENT
           value: "prod"
