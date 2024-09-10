@@ -91,6 +91,13 @@ jobs:
         echo "Updated Kustomization:"
         cat k8s/$ENVIRONMENT/kustomization.yaml
 
+    - name: Check Kustomize Output
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+      run: |
+        echo "Kustomize output for $ENVIRONMENT:"
+        kubectl kustomize k8s/$ENVIRONMENT
+
     - name: Create or Update ArgoCD Application
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
@@ -101,6 +108,9 @@ jobs:
         metadata:
           name: sample-app-$ENVIRONMENT
           namespace: argocd
+          annotations:
+            argocd.argoproj.io/refresh: hard
+            argocd.argoproj.io/sync-options: Prune=true
         spec:
           project: default
           source:
@@ -114,25 +124,13 @@ jobs:
             automated:
               prune: true
               selfHeal: true
+            syncOptions:
+            - CreateNamespace=true
+            - PruneLast=true
+            - PrunePropagationPolicy=foreground
         EOF
 
-    - name: Debug ArgoCD Application
-      env:
-        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-      run: |
-        echo "ArgoCD Application Details:"
-        kubectl get application sample-app-$ENVIRONMENT -n argocd -o yaml
-        
-        echo "Kubernetes Resources:"
-        kubectl get all -n $ENVIRONMENT
-        
-        echo "Deployment Logs:"
-        kubectl logs -n $ENVIRONMENT -l app=sample-app --tail=100 || true
-        
-        echo "Deployment Events:"
-        kubectl get events -n $ENVIRONMENT --sort-by='.lastTimestamp'
-
-    - name: Wait for Sync to Complete
+    - name: Wait for Sync to Complete and Debug
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
@@ -149,9 +147,30 @@ jobs:
           
           if [ $i -eq 30 ]; then
             echo "Timeout waiting for application to sync and become healthy"
+            echo "ArgoCD Application Details:"
             kubectl get application sample-app-$ENVIRONMENT -n argocd -o yaml
+            
+            echo "Kubernetes Resources in $ENVIRONMENT namespace:"
+            kubectl get all -n $ENVIRONMENT
+            
+            echo "Pods in $ENVIRONMENT namespace:"
+            kubectl get pods -n $ENVIRONMENT
+            
+            echo "Describing pods in $ENVIRONMENT namespace:"
+            kubectl describe pods -n $ENVIRONMENT
+            
+            echo "Logs from pods in $ENVIRONMENT namespace:"
+            for pod in $(kubectl get pods -n $ENVIRONMENT -o jsonpath='{.items[*].metadata.name}'); do
+              echo "Logs for pod $pod:"
+              kubectl logs -n $ENVIRONMENT $pod --all-containers || true
+            done
+            
+            echo "Events in $ENVIRONMENT namespace:"
+            kubectl get events -n $ENVIRONMENT --sort-by='.lastTimestamp'
+            
             echo "ArgoCD Application Controller Logs:"
             kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
+            
             exit 1
           fi
           
