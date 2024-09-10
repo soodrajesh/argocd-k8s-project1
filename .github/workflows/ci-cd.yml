@@ -94,13 +94,18 @@ jobs:
         sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
         sed -i 's|${IMAGE_TAG}|'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
 
-    - name: Commit and push updated manifests
+    - name: Configure Git
       run: |
         git config --global user.name 'GitHub Actions'
-        git config --global user.email 'actions@github.com'
+        git config --global user.email 'github-actions@github.com'
+
+    - name: Commit and push updated manifests
+      env:
+        PAT: ${{ secrets.PAT }}
+      run: |
         git add k8s/
         git commit -m "Update image tag to ${{ github.sha }}" || echo "No changes to commit"
-        git push
+        git push https://$PAT@github.com/${{ github.repository }}.git HEAD:${{ github.ref }}
 
     - name: Wait for Sync to Complete
       run: |
