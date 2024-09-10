@@ -5,7 +5,8 @@ app = Flask(__name__)
 
 @app.route('/')
 def hello():
-    return f"Hello from {os.environ.get('ENVIRONMENT', 'Unknown')} environment!"
+    environment = os.environ.get('ENVIRONMENT', 'unknown')
+    return f'Hello from the {environment} environment!'
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=5000)
