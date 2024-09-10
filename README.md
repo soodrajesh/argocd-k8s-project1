@@ -16,6 +16,7 @@ This application is automatically deployed using GitHub Actions and ArgoCD. The 
 2. The ArgoCD application is updated with the new image tag.
 3. ArgoCD syncs the application, deploying it to the appropriate environment (dev or prod).
 
+
 ## Viewing the Application
 
 After deployment:
