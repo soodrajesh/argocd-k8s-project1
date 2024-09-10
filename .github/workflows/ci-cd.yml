@@ -82,16 +82,11 @@ jobs:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
         cd k8s/$ENVIRONMENT
-        kustomize edit set image ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+        kustomize edit set image sample-app=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' kustomization.yaml
+        sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' kustomization.yaml
 
-    - name: Print updated Kustomization
-      env:
-        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-      run: |
-        echo "Updated Kustomization:"
-        cat k8s/$ENVIRONMENT/kustomization.yaml
-
-    - name: Check Kustomize Output
+    - name: Print Kustomize Output
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
@@ -171,37 +166,11 @@ jobs:
             echo "ArgoCD Application Controller Logs:"
             kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
             
+            echo "Deployment YAML:"
+            kubectl get deployment -n $ENVIRONMENT -o yaml
+            
             exit 1
           fi
           
           sleep 10
         done
-
-    - name: Debug Information
-      if: failure()
-      env:
-        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-      run: |
-        echo "Debug information:"
-        echo "ECR_REGISTRY: $ECR_REGISTRY"
-        echo "ECR_REPOSITORY: $ECR_REPOSITORY"
-        echo "IMAGE_TAG: $IMAGE_TAG"
-        echo "ENVIRONMENT: $ENVIRONMENT"
-        
-        echo "Kustomization YAML:"
-        cat k8s/$ENVIRONMENT/kustomization.yaml
-        
-        echo "Pods in $ENVIRONMENT namespace:"
-        kubectl get pods -n $ENVIRONMENT
-        
-        echo "Describing pods in $ENVIRONMENT namespace:"
-        kubectl describe pods -n $ENVIRONMENT
-        
-        echo "ArgoCD Application:"
-        kubectl get application sample-app-$ENVIRONMENT -n argocd -o yaml
-        
-        echo "ArgoCD Application Controller Logs:"
-        kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
-        
-        echo "Events in $ENVIRONMENT namespace:"
-        kubectl get events -n $ENVIRONMENT

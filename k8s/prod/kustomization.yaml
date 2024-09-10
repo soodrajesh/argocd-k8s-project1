@@ -3,6 +3,10 @@ kind: Kustomization
 namespace: prod
 resources:
 - ../base
+images:
+- name: sample-app
+  newName: ${ECR_REGISTRY}/${ECR_REPOSITORY}
+  newTag: ${IMAGE_TAG}
 patchesStrategicMerge:
 - |-
   apiVersion: apps/v1
