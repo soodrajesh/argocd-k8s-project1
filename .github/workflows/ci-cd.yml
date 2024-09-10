@@ -54,65 +54,75 @@ jobs:
       run: |
         aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} | aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
-    - name: Verify ArgoCD Installation
+    - name: Create Namespaces
       run: |
-        kubectl get pods -n argocd
-        kubectl get application -n argocd
+        kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create namespace prod --dry-run=client -o yaml | kubectl apply -f -
 
-    - name: Update ArgoCD Application
+    - name: Create or Update ArgoCD Application
       env:
         ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
       run: |
-        kubectl patch application sample-app -n argocd --type=merge -p '{
-          "spec": {
-            "source": {
-              "repoURL": "${{ github.server_url }}/${{ github.repository }}",
-              "path": "k8s/$ENVIRONMENT",
-              "targetRevision": "${{ github.sha }}"
-            },
-            "destination": {
-              "server": "https://kubernetes.default.svc",
-              "namespace": "$ENVIRONMENT"
-            }
-          }
-        }'
+        cat <<EOF | kubectl apply -f -
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: sample-app
+          namespace: argocd
+        spec:
+          project: default
+          source:
+            repoURL: ${{ github.server_url }}/${{ github.repository }}
+            path: k8s/$ENVIRONMENT
+            targetRevision: ${{ github.sha }}
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: $ENVIRONMENT
+          syncPolicy:
+            automated:
+              prune: true
+              selfHeal: true
+        EOF
 
-    - name: Sync ArgoCD Application
+    - name: Update Kubernetes manifests
+      env:
+        ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-        kubectl patch application sample-app -n argocd --type=merge -p '{
-          "operation": {
-            "sync": {
-              "revision": "${{ github.sha }}",
-              "prune": true,
-              "force": false
-            }
-          }
-        }'
+        sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' k8s/$ENVIRONMENT/deployment.yaml
+        sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' k8s/$ENVIRONMENT/deployment.yaml
+        sed -i 's|${IMAGE_TAG}|'$IMAGE_TAG'|g' k8s/$ENVIRONMENT/deployment.yaml
+
+    - name: Commit and push updated manifests
+      run: |
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'actions@github.com'
+        git add k8s/
+        git commit -m "Update image tag to ${{ github.sha }}" || echo "No changes to commit"
+        git push
 
     - name: Wait for Sync to Complete
       run: |
         echo "Waiting for sync to complete..."
-        for i in {1..30}; do
-          sync_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.sync.status}')
-          health_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
-          echo "Sync Status: $sync_status, Health Status: $health_status"
-          if [ "$sync_status" = "Synced" ] && [ "$health_status" = "Healthy" ]; then
-            echo "Application synced and healthy"
-            exit 0
-          fi
-          if [ "$i" -eq 30 ]; then
-            echo "Timeout waiting for application to sync and become healthy"
-            kubectl get application sample-app -n argocd -o yaml
-            exit 1
-          fi
-          sleep 10
-        done
+        kubectl wait --for=condition=Synced application/sample-app -n argocd --timeout=300s
+        
+        echo "Checking application health..."
+        health_status=$(kubectl get application sample-app -n argocd -o jsonpath='{.status.health.status}')
+        if [ "$health_status" = "Healthy" ]; then
+          echo "Application is healthy"
+          exit 0
+        else
+          echo "Application health status: $health_status"
+          kubectl get application sample-app -n argocd -o yaml
+          exit 1
+        fi
 
     - name: Debug Information
       if: failure()
       run: |
         echo "Debug information:"
         kubectl get pods -n argocd
-        kubectl get application sample-app -n argocd -o yaml
+        kubectl get application sample-app -n argocd -o yaml || true
         kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
-        kubectl describe application sample-app -n argocd
+        kubectl describe application sample-app -n argocd || true
