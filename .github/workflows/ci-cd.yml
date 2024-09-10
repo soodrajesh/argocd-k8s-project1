@@ -85,6 +85,8 @@ jobs:
         kustomize edit set image sample-app=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         sed -i 's|${ECR_REGISTRY}|'$ECR_REGISTRY'|g' kustomization.yaml
         sed -i 's|${ECR_REPOSITORY}|'$ECR_REPOSITORY'|g' kustomization.yaml
+        sed -i 's|${IMAGE_TAG}|'$IMAGE_TAG'|g' kustomization.yaml
+        cat kustomization.yaml
 
     - name: Print Kustomize Output
       env:
@@ -103,9 +105,6 @@ jobs:
         metadata:
           name: sample-app-$ENVIRONMENT
           namespace: argocd
-          annotations:
-            argocd.argoproj.io/refresh: hard
-            argocd.argoproj.io/sync-options: Prune=true
         spec:
           project: default
           source:
@@ -119,10 +118,6 @@ jobs:
             automated:
               prune: true
               selfHeal: true
-            syncOptions:
-            - CreateNamespace=true
-            - PruneLast=true
-            - PrunePropagationPolicy=foreground
         EOF
 
     - name: Wait for Sync to Complete and Debug
@@ -145,29 +140,17 @@ jobs:
             echo "ArgoCD Application Details:"
             kubectl get application sample-app-$ENVIRONMENT -n argocd -o yaml
             
-            echo "Kubernetes Resources in $ENVIRONMENT namespace:"
-            kubectl get all -n $ENVIRONMENT
-            
             echo "Pods in $ENVIRONMENT namespace:"
             kubectl get pods -n $ENVIRONMENT
             
             echo "Describing pods in $ENVIRONMENT namespace:"
             kubectl describe pods -n $ENVIRONMENT
             
-            echo "Logs from pods in $ENVIRONMENT namespace:"
-            for pod in $(kubectl get pods -n $ENVIRONMENT -o jsonpath='{.items[*].metadata.name}'); do
-              echo "Logs for pod $pod:"
-              kubectl logs -n $ENVIRONMENT $pod --all-containers || true
-            done
+            echo "Deployment YAML:"
+            kubectl get deployment sample-app -n $ENVIRONMENT -o yaml
             
             echo "Events in $ENVIRONMENT namespace:"
             kubectl get events -n $ENVIRONMENT --sort-by='.lastTimestamp'
-            
-            echo "ArgoCD Application Controller Logs:"
-            kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
-            
-            echo "Deployment YAML:"
-            kubectl get deployment -n $ENVIRONMENT -o yaml
             
             exit 1
           fi
