@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: sample-app
-        image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+        image: /my-sample-app:acb7efb3a6ce61eae6a172a229a77fceea7d7ada
         env:
         - name: ENVIRONMENT
           value: "prod"
