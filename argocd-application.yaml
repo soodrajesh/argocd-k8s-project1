@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/soodrajesh/argocd-k8s-project1.git
+    repoURL: https://github.com/soodrajesh/Flask-ArgoCD-Kubernetes-Deployment.git
     targetRevision: HEAD
     path: k8s
   destination:

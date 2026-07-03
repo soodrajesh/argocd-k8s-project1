@@ -3,7 +3,7 @@
 # Set variables
 EKS_CLUSTER_NAME="demo-eks-cluster"
 AWS_PROFILE="raj-private"
-GITHUB_REPO="https://github.com/soodrajesh/argocd-k8s-project1.git"
+GITHUB_REPO="https://github.com/soodrajesh/Flask-ArgoCD-Kubernetes-Deployment.git"
 GITHUB_TOKEN_PARAM_NAME="/soodrajesh-github-token"
 
 # Function to check if a command exists
