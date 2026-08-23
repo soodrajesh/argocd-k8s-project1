@@ -26,11 +26,11 @@ There are two ArgoCD Application definitions in this repo and they're not quite 
 
 The `argocd-setup.sh`/`argocd-install.sh` scripts and the static `argocd-application.yaml` are effectively the manual, pre-CI way of standing this up (they also configure ArgoCD's access to a private repo via a token pulled from AWS SSM). The GitHub Actions workflow is the automated version that grew out of that. I kept both in the repo because the manual path is still useful for a first-time bootstrap of ArgoCD itself on a fresh cluster; the workflow doesn't install ArgoCD, only the CD scripts do.
 
-## What's missing
+## Deliberately out of scope
 
-**The CI pipeline has a real gap: it patches placeholders locally but never commits them.** `k8s/dev/kustomization.yaml` and `k8s/prod/kustomization.yaml` contain unresolved `${ECR_REGISTRY}`, `${ECR_REPOSITORY}`, and `${IMAGE_TAG}` placeholders — kustomize doesn't expand these itself. The workflow's "Update Kustomization" step does `kustomize edit set image` and `sed` against the checked-out copy inside the runner, but there's no `git commit` / `git push` step afterward. The ArgoCD Application the workflow then creates is pinned to that same commit SHA, so when ArgoCD actually clones the repo to sync, it sees the original, unresolved kustomization file, not the patched one the runner just printed. As written, the pipeline builds and pushes a real image, but the manifest ArgoCD ends up syncing doesn't reference it correctly. Fixing this needs a decision about how the pipeline should write back to git (bot commit to a deploy branch, a separate manifests repo, image-updater, etc.), so I left it as-is rather than guessing.
-
-There is no environment beyond dev/prod namespaces on one cluster — no separate cluster per environment, no promotion gate between them beyond which branch triggered the build. `EKS_CLUSTER_NAME`, `AWS_PROFILE`, and the SSM parameter path in `argocd-install.sh` / `argocd-setup.sh` are values from my own sandbox account and need to be replaced before this is reusable anywhere else. The app itself runs on Flask's built-in development server (`app.run()`, invoked via `python app.py` in the Dockerfile) rather than a WSGI server like gunicorn; there's also no `requirements.txt` — the Dockerfile installs Flask directly with an unpinned `pip install flask`. `dir.sh` is leftover scaffolding from when I first laid out the project directories; it's not part of the deploy path and can be ignored.
+- The CI pipeline patches image placeholders locally but never commits them back — ArgoCD clones the original, unresolved kustomization, not the patched one the runner built. Fixing it needs a decision about how the pipeline writes back to git (bot commit, image-updater, a separate manifests repo), so it's left as-is rather than guessed at.
+- No environment separation beyond dev/prod namespaces on one cluster — no separate cluster per environment, no promotion gate beyond which branch triggered the build.
+- The app runs on Flask's built-in dev server, not a WSGI server like gunicorn, and dependencies aren't pinned (`pip install flask`, no `requirements.txt`).
 
 ## Project structure
 
